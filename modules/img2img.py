@@ -6,7 +6,7 @@ import traceback
 import numpy as np
 from PIL import Image, ImageOps, ImageChops
 
-from modules import devices, sd_samplers
+from modules import devices
 from modules.processing import Processed, StableDiffusionProcessingImg2Img, process_images
 from modules.shared import opts, state
 import modules.shared as shared
@@ -19,7 +19,7 @@ import modules.scripts
 def process_batch(p, input_dir, output_dir, args):
     processing.fix_seed(p)
 
-    images = shared.listfiles(input_dir)
+    images = [file for file in [os.path.join(input_dir, x) for x in os.listdir(input_dir)] if os.path.isfile(file)]
 
     print(f"Will process {len(images)} images, creating {p.n_iter * p.batch_size} new images for each.")
 
@@ -39,8 +39,6 @@ def process_batch(p, input_dir, output_dir, args):
             break
 
         img = Image.open(image)
-        # Use the EXIF orientation of photos taken by smartphones.
-        img = ImageOps.exif_transpose(img) 
         p.init_images = [img] * p.batch_size
 
         proc = modules.scripts.scripts_img2img.run(p, *args)
@@ -55,7 +53,6 @@ def process_batch(p, input_dir, output_dir, args):
                 filename = f"{left}-{n}{right}"
 
             if not save_normally:
-                os.makedirs(output_dir, exist_ok=True)
                 processed_image.save(os.path.join(output_dir, filename))
 
 
@@ -64,25 +61,18 @@ def img2img(mode: int, prompt: str, negative_prompt: str, prompt_style: str, pro
     is_batch = mode == 2
 
     if is_inpaint:
-        # Drawn mask
         if mask_mode == 0:
             image = init_img_with_mask['image']
             mask = init_img_with_mask['mask']
             alpha_mask = ImageOps.invert(image.split()[-1]).convert('L').point(lambda x: 255 if x > 0 else 0, mode='1')
             mask = ImageChops.lighter(alpha_mask, mask.convert('L')).convert('L')
             image = image.convert('RGB')
-        # Uploaded mask
         else:
             image = init_img_inpaint
             mask = init_mask_inpaint
-    # No mask
     else:
         image = init_img
         mask = None
-
-    # Use the EXIF orientation of photos taken by smartphones.
-    if image is not None:
-        image = ImageOps.exif_transpose(image) 
 
     assert 0. <= denoising_strength <= 1., 'can only work with strength in [0.0, 1.0]'
 
@@ -99,7 +89,7 @@ def img2img(mode: int, prompt: str, negative_prompt: str, prompt_style: str, pro
         seed_resize_from_h=seed_resize_from_h,
         seed_resize_from_w=seed_resize_from_w,
         seed_enable_extras=seed_enable_extras,
-        sampler_name=sd_samplers.samplers_for_img2img[sampler_index].name,
+        sampler_index=sampler_index,
         batch_size=batch_size,
         n_iter=n_iter,
         steps=steps,
@@ -119,9 +109,6 @@ def img2img(mode: int, prompt: str, negative_prompt: str, prompt_style: str, pro
         inpainting_mask_invert=inpainting_mask_invert,
     )
 
-    p.scripts = modules.scripts.scripts_txt2img
-    p.script_args = args
-
     if shared.cmd_opts.enable_console_prompts:
         print(f"\nimg2img: {prompt}", file=shared.progress_print_out)
 
@@ -137,8 +124,6 @@ def img2img(mode: int, prompt: str, negative_prompt: str, prompt_style: str, pro
         processed = modules.scripts.scripts_img2img.run(p, *args)
         if processed is None:
             processed = process_images(p)
-
-    p.close()
 
     shared.total_tqdm.clear()
 
